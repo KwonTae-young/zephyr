@@ -24,4 +24,11 @@ config PWM_STM32_2
 
 endif # PWM
 
+if ADC
+
+config ADC_STM32
+	default y
+
+endif # ADC
+
 endif # BOARD_STM32F4_DISCO

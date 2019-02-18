@@ -1,0 +1,4 @@
+sample:
+  description: STM32F4-DISCO ADC TEST
+    application
+  name: adc
