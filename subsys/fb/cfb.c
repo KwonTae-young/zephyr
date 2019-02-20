@@ -311,6 +311,7 @@ int cfb_framebuffer_init(struct device *dev)
 	fb->font_idx = 0U;
 
 	fb->size = fb->x_res * fb->y_res / fb->ppt;
+	printk("%s %s() %dLine fb->size=%d\n", __FILE__, __func__, __LINE__, fb->size);
 	fb->buf = k_malloc(fb->size);
 	if (!fb->buf) {
 		return -1;

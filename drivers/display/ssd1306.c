@@ -269,7 +269,7 @@ int ssd1306_write(const struct device *dev, const u16_t x, const u16_t y,
 		LOG_ERR("Failed to write command");
 		return -1;
 	}
-
+	printk("%s %s() %dLine\t\tdesc->buf_size=%d\n", __FILE__, __func__, __LINE__, desc->buf_size);
 	return i2c_burst_write(driver->i2c, DT_SOLOMON_SSD1306FB_0_BASE_ADDRESS,
 			       SSD1306_CONTROL_LAST_BYTE_DATA,
 			       (u8_t *)buf, desc->buf_size);

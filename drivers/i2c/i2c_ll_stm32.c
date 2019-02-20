@@ -81,6 +81,7 @@ static int i2c_stm32_transfer(struct device *dev, struct i2c_msg *msg,
 	for (u8_t i = 1; i <= num_msgs; i++) {
 		/* Maximum length of a single message is 255 Bytes */
 		if (current->len > 255) {
+			printk("%s %s() %dLine\tcurrent->len=%d > 255 !!!! \n",__FILE__ ,__func__, __LINE__, current->len);
 			ret = -EINVAL;
 			break;
 		}
