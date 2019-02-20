@@ -22,4 +22,14 @@ config PWM_STM32_2
 
 endif # PWM
 
+if I2C
+
+config I2C_1
+	default y
+
+config I2C_STM32_INTERRUPT
+	default y
+
+endif # I2C
+
 endif # BOARD_STM32F4_DISCO
