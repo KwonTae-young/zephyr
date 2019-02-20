@@ -85,3 +85,7 @@
 &usbotg_fs {
 	status = "okay";
 };
+
+&i2c1 {
+	status = "okay";
+};
