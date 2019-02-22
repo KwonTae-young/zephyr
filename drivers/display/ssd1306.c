@@ -185,6 +185,7 @@ static int ssd1306_i2c_data_write(const struct device *dev, const u8_t *data,
 	u32_t cur_length;
 	struct ssd1306_data *driver = dev->driver_data;
 
+	printk("%s %s() %dLine length=%d\n", __FILE__, __func__, __LINE__, length);
 	do {
 		if (length > CONFIG_SSD1306_MAX_I2C_TRANSFER_SIZE) {
 			cur_length = CONFIG_SSD1306_MAX_I2C_TRANSFER_SIZE;
@@ -195,6 +196,7 @@ static int ssd1306_i2c_data_write(const struct device *dev, const u8_t *data,
 			length = 0;
 			cmd = SSD1306_CONTROL_LAST_BYTE_DATA;
 		}
+		printk("%s %s() %dLine length=%d\n", __FILE__, __func__, __LINE__, length);
 		err = i2c_burst_write(driver->i2c,
 				      DT_SOLOMON_SSD1306FB_0_BASE_ADDRESS,
 				      cmd, data, length);
@@ -431,6 +433,8 @@ static int ssd1306_init(struct device *dev)
 	struct ssd1306_data *driver = dev->driver_data;
 
 	LOG_DBG("");
+
+	printk("%s %s() %dLine  CONFIG_SSD1306_MAX_I2C_TRANSFER_SIZE=%d\n", __FILE__, __func__, __LINE__,  CONFIG_SSD1306_MAX_I2C_TRANSFER_SIZE);
 
 	driver->i2c = device_get_binding(DT_SOLOMON_SSD1306FB_0_BUS_NAME);
 	if (driver->i2c == NULL) {
