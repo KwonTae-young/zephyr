@@ -1,0 +1,7 @@
+sample:
+  name: SPI AT86RF2XX RF Tranceiver sample
+tests:
+  sample.driver.spi_fujitsu_fram:
+    platform_whitelist: stm32f4_disco
+    tags: drivers rf
+    harness: rf
