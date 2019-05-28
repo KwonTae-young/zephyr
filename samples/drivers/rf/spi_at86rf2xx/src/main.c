@@ -9,12 +9,18 @@
 #include <zephyr.h>
 #include <misc/printk.h>
 #include <device.h>
-#include <errno.h>
 #include <gpio.h>
 #include <spi.h>
 #include <string.h>
+#include <errno.h>
 
-//#define IEEE802154_USE	1
+//#define IEEE802154_USE
+
+/*
+ * WRITE(Tx) Mode: #define WRITE
+ * READ(Rx) Mode: //#define WRITE
+ */
+#define WRITE
 
 #define AT86RF2XX_REG__TRX_STATUS	0x01
 #define AT86RF2XX_REG__TRX_STATE	0x02
@@ -66,6 +72,7 @@
 
 /* 6.3 SPI Protocol */
 #define AT86RF2XX_ACCESS_READ	0x00
+#define AT86RF2XX_ACCESS_FB	0x20
 #define AT86RF2XX_ACCESS_WRITE	0x40
 #define AT86RF2XX_ACCESS_REG	0x80
 
@@ -109,6 +116,8 @@
 //#define AT86RF2XX_OPT_USE_SRC_PAN	0x0400       /**< do not compress source PAN ID */
 
 #define AT86RF2XX_TRX_CTRL_2_MASK__RX_SAFE_MODE	0x80
+#define AT86RF2XX_TRX_CTRL_2_MASK__OQPSK_DATA_RATE	0x03
+
 
 #define AT86RF2XX_TRX_CTRL_0_MASK__CLKM_CTRL		0x07
 #define AT86RF2XX_TRX_CTRL_0_MASK__CLKM_SHA_SEL	0x08
@@ -130,17 +139,19 @@
 
 #define AT86RF2XX_TRX_STATUS_MASK__TRX_STATUS	0x1F
 
+#define AT86RF2XX_TRX_STATE__TX_START			0x02
 #define AT86RF2XX_TRX_STATE__FORCE_TRX_OFF		0x03
 
 
-#define AT86RF2XX_RESET_PULSE_WIDTH	1
-#define AT86RF2XX_RESET_DELAY		1
+#define AT86RF2XX_RESET_PULSE_WIDTH	100
+#define AT86RF2XX_RESET_DELAY		50
 
 #define AT86RF2XX_WAKEUP_DELAY		1	/* 300us... */
 
 #define AT86RF2XX_MAX_PKT_LENGTH	127
 
 #define AT86RF2XX_ACCESS_SRAM		0x00
+#define AT86RF2XX_ACCESS_READ		0x00
 #define AT86RF2XX_ACCESS_WRITE		0x40
 
 
@@ -148,8 +159,6 @@ static const int8_t tx_power_to_dbm[] = {
 	4, 4, 3, 3, 2, 2, 1, 0, -1, -2, -3, -4, -6, -8 -12, -17
 };
 
-
-struct device *sleep;
 uint16_t options;
 uint64_t ieee_addr_double;
 uint8_t ieee_addr_char[8];
@@ -159,6 +168,18 @@ uint8_t frame_len;
 
 #define IRQ_FLAGS		(GPIO_DIR_IN | GPIO_INT | GPIO_INT_EDGE | GPIO_PUD_PULL_UP | GPIO_INT_ACTIVE_HIGH)
 
+static struct k_work data_read_work;
+
+struct device *spi;
+struct spi_config spi_cfg;
+struct device *sleep;
+
+enum data_rate_type {
+	TWO_FIVE_ZERO_KBPS,
+	FIVE_ZERO_ZERO_KBPS,
+	ONE_MBPS,
+	TWO_MBPS,
+};
 
 static int at86rf2xx_access(struct device *spi, struct spi_config *spi_cfg,
 			    uint8_t cmd, uint16_t addr, void *data, size_t len)
@@ -194,13 +215,6 @@ static int at86rf2xx_access(struct device *spi, struct spi_config *spi_cfg,
 	return spi_write(spi, spi_cfg, &tx);
 }
 
-static int at86rf2xx_sram_access(struct device *spi, struct spi_config *spi_cfg,
-			    uint8_t cmd, uint16_t addr, void *data, size_t len)
-{
-	/* TODO */
-	return 0
-}
-
 static int read_reg(struct device *spi, struct spi_config *spi_cfg,
 		      uint16_t addr, uint8_t *data, u32_t num_bytes)
 {
@@ -231,6 +245,112 @@ static int write_reg(struct device *spi, struct spi_config *spi_cfg,
 	return 0;
 }
 
+static int at86rf2xx_sram_access(struct device *spi, struct spi_config *spi_cfg,
+			    uint8_t cmd, uint8_t addr, void *data, size_t len)
+{
+	uint8_t access[2];
+	struct spi_buf bufs[] = {
+		{
+			.buf = access,
+		},
+		{
+			.buf = data,
+			.len = len
+		}
+	};
+	struct spi_buf_set tx = {
+		.buffers = bufs
+	};
+
+	access[0] = cmd;
+	access[1] = addr;
+
+	bufs[0].len = 2;
+	tx.count = 2;
+
+	if (cmd == AT86RF2XX_ACCESS_READ) {
+		struct spi_buf_set rx = {
+			.buffers = bufs,
+			.count = 2
+		};
+
+		return spi_transceive(spi, spi_cfg, &tx, &rx);
+	}
+
+	return spi_write(spi, spi_cfg, &tx);
+}
+
+static int at86rf2xx_read_sram(struct device *spi, struct spi_config *spi_cfg,
+		      uint8_t addr, uint8_t *data, u32_t num_bytes)
+{
+	int err;
+
+	err = at86rf2xx_sram_access(spi, spi_cfg,
+			       AT86RF2XX_ACCESS_READ, addr, data, num_bytes);
+	if (err) {
+		printk("Error during SPI read\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int at86rf2xx_write_sram(struct device *spi, struct spi_config *spi_cfg,
+		      uint8_t addr, uint8_t *data, u32_t num_bytes)
+{
+	int err;
+
+	err = at86rf2xx_sram_access(spi, spi_cfg,
+			       AT86RF2XX_ACCESS_WRITE, addr, data, num_bytes);
+	if (err) {
+		printk("Error during SPI write\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+/*
+static int at86rf2xx_fb_access(struct device *spi, struct spi_config *spi_cfg,
+				void *data, const size_t len)
+{
+	uint8_t access[1];
+	struct spi_buf bufs[] = {
+		{
+			.buf = access,
+		}
+	};
+	struct spi_buf_set tx = {
+		.buffers = bufs
+	};
+
+	access[0] = AT86RF2XX_ACCESS_FB;
+	bufs[0].len = 1;
+	tx.count = 1;
+
+	struct spi_buf_set rx = {
+		.buffers = bufs,
+		.count = 1
+	};
+
+	return spi_transceive(spi, spi_cfg, &tx, &rx);
+}
+
+static int at86rf2xx_read_fb(struct device *spi, struct spi_config *spi_cfg,
+		      uint8_t *data, u32_t num_bytes)
+{
+	int err;
+
+	err = at86rf2xx_fb_access(spi, spi_cfg, data, num_bytes);
+	if (err) {
+		printk("Error during SPI read\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+*/
+
 static int at86rf2xx_part_number(struct device *spi, struct spi_config *spi_cfg)
 {
 	uint8_t id;
@@ -242,7 +362,7 @@ static int at86rf2xx_part_number(struct device *spi, struct spi_config *spi_cfg)
 		return -EIO;
 	}
 
-	printk("PART_NUM:0x%x\n", id);
+	printk("PART_NUM: 0x%x\n", id);
 
 	if (id != AT86RF2XX_PART_NUMBER)
 		return -EIO;
@@ -262,7 +382,7 @@ static int at86rf2xx_version_number(struct device *spi, struct spi_config *spi_c
 		return -EIO;
 	}
 
-	printk("VERSION_NUM:0x%x\n", version);
+	printk("VERSION_NUM: 0x%x\n", version);
 
 	if ((version != AT86RF2XX_REVISION_A) && (version != AT86RF2XX_REVISION_B))
 		return -EIO;
@@ -273,8 +393,8 @@ static int at86rf2xx_version_number(struct device *spi, struct spi_config *spi_c
 
 static int at86rf2xx_man_id(struct device *spi, struct spi_config *spi_cfg)
 {
-	uint8_t id[2];
 	uint16_t man_id;
+	uint8_t id[2];
 	int err;
 
 	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__MAN_ID_0, id, 1);
@@ -290,7 +410,7 @@ static int at86rf2xx_man_id(struct device *spi, struct spi_config *spi_cfg)
 	}
 
 	man_id = (id[1] << 8) | id[0];
-	printk("MAN_ID:0x%x\n", man_id);
+	printk("MAN_ID: 0x%x\n", man_id);
 
 	if (man_id != AT86RF2XX_MAN_ID)
 		return -EIO;
@@ -298,7 +418,7 @@ static int at86rf2xx_man_id(struct device *spi, struct spi_config *spi_cfg)
 	return 0;
 }
 
-static uint16_t at86rf2xx_read_short_addr(struct device *spi, struct spi_config *spi_cfg)
+static uint16_t at86rf2xx_get_short_addr(struct device *spi, struct spi_config *spi_cfg)
 {
 	uint8_t addr[2];
 	int i, err;
@@ -314,7 +434,7 @@ static uint16_t at86rf2xx_read_short_addr(struct device *spi, struct spi_config 
 	return (addr[0] << 8) | addr[1];
 }
 
-static int at86rf2xx_write_short_addr(struct device *spi, struct spi_config *spi_cfg,
+static int at86rf2xx_set_short_addr(struct device *spi, struct spi_config *spi_cfg,
 					uint16_t short_addr)
 {
 	uint8_t addr[2];
@@ -334,7 +454,7 @@ static int at86rf2xx_write_short_addr(struct device *spi, struct spi_config *spi
 	return 0;
 }
 
-static uint16_t at86rf2xx_read_pan_id(struct device *spi, struct spi_config *spi_cfg)
+static uint16_t at86rf2xx_get_pan_id(struct device *spi, struct spi_config *spi_cfg)
 {
 	uint8_t id[2];
 	int i, err;
@@ -350,7 +470,7 @@ static uint16_t at86rf2xx_read_pan_id(struct device *spi, struct spi_config *spi
 	return (id[0] << 8) | id[1];
 }
 
-static int at86rf2xx_write_pan_id(struct device *spi, struct spi_config *spi_cfg,
+static int at86rf2xx_set_pan_id(struct device *spi, struct spi_config *spi_cfg,
 					uint16_t pan_id)
 {
 	uint8_t id[2];
@@ -370,7 +490,7 @@ static int at86rf2xx_write_pan_id(struct device *spi, struct spi_config *spi_cfg
 	return 0;
 }
 
-static uint64_t at86rf2xx_read_ieee_addr(struct device *spi, struct spi_config *spi_cfg)
+static uint64_t at86rf2xx_get_ieee_addr(struct device *spi, struct spi_config *spi_cfg)
 {
 	uint64_t ieee_addr = 0;
 	uint8_t addr[8];
@@ -392,7 +512,7 @@ static uint64_t at86rf2xx_read_ieee_addr(struct device *spi, struct spi_config *
 	return ieee_addr;
 }
 
-static int at86rf2xx_write_ieee_addr(struct device *spi, struct spi_config *spi_cfg,
+static int at86rf2xx_set_ieee_addr(struct device *spi, struct spi_config *spi_cfg,
 					uint64_t ieee_addr)
 {
 	uint8_t addr[8];
@@ -421,9 +541,8 @@ static int at86rf2xx_write_ieee_addr(struct device *spi, struct spi_config *spi_
 	return 0;
 }
 
-static uint8_t at86rf2xx_read_channel(struct device *spi, struct spi_config *spi_cfg)
+static uint8_t at86rf2xx_get_channel(struct device *spi, struct spi_config *spi_cfg)
 {
-
 	uint8_t val;
 	int err;
 
@@ -436,7 +555,7 @@ static uint8_t at86rf2xx_read_channel(struct device *spi, struct spi_config *spi
 	return val & AT86RF2XX_PHY_CC_CCA__CHANNEL;
 }
 
-static int at86rf2xx_write_channel(struct device *spi, struct spi_config *spi_cfg,
+static int at86rf2xx_set_channel(struct device *spi, struct spi_config *spi_cfg,
 					uint8_t channel)
 {
 	uint8_t val;
@@ -460,7 +579,7 @@ static int at86rf2xx_write_channel(struct device *spi, struct spi_config *spi_cf
 	return 0;
 }
 
-static int8_t at86rf2xx_read_tx_power(struct device *spi, struct spi_config *spi_cfg)
+static int8_t at86rf2xx_get_tx_power(struct device *spi, struct spi_config *spi_cfg)
 {
 	uint8_t val;
 	int err;
@@ -474,7 +593,7 @@ static int8_t at86rf2xx_read_tx_power(struct device *spi, struct spi_config *spi
 	return tx_power_to_dbm[val & AT86RF2XX_PHY_TX_PWR_MASK];
 }
 
-static int at86rf2xx_write_tx_power(struct device *spi, struct spi_config *spi_cfg,
+static int at86rf2xx_set_tx_power(struct device *spi, struct spi_config *spi_cfg,
 					int8_t tx_power)
 {
 	int err;
@@ -487,6 +606,34 @@ static int at86rf2xx_write_tx_power(struct device *spi, struct spi_config *spi_c
 	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__PHY_TX_PWR, &tx_power , 1);
 	if (err) {
 		printk("Error during AT86RF2XX_REG__PHY_TX_PWR write\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int8_t at86rf2xx_get_sfd(struct device *spi, struct spi_config *spi_cfg)
+{
+	uint8_t val;
+	int err;
+
+	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__SFD_VALUE, &val , 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__SFD_VALUE read\n");
+		return -EIO;
+	}
+
+	return val;
+}
+
+static int at86rf2xx_set_sfd(struct device *spi, struct spi_config *spi_cfg,
+					uint8_t sfd)
+{
+	int err;
+
+	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__SFD_VALUE, &sfd , 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__SFD_VALUE write\n");
 		return -EIO;
 	}
 
@@ -724,8 +871,15 @@ static int at86rf2xx_set_option(struct device *spi, struct spi_config *spi_cfg,
 
 static int at86rf2xx_enable_rx_safe_mode(struct device *spi, struct spi_config *spi_cfg)
 {
-	uint8_t val = AT86RF2XX_TRX_CTRL_2_MASK__RX_SAFE_MODE;
+	uint8_t val;
 	int err;
+
+	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_CTRL_2, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_CTRL_2 write\n");
+		return -EIO;
+	}
+	val |= AT86RF2XX_TRX_CTRL_2_MASK__RX_SAFE_MODE;
 
 	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_CTRL_2, &val, 1);
 	if (err) {
@@ -734,6 +888,49 @@ static int at86rf2xx_enable_rx_safe_mode(struct device *spi, struct spi_config *
 	}
 
 	return 0;
+}
+
+static int at86rf2xx_set_data_rate(struct device *spi, struct spi_config *spi_cfg,
+					enum data_rate_type data_rate)
+{
+	uint8_t val;
+	int err;
+
+	if ((data_rate < TWO_FIVE_ZERO_KBPS) || (data_rate > TWO_MBPS)) {
+		printk("data rate range over\n");
+		return -EIO;
+	}
+
+	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_CTRL_2, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_CTRL_2 write\n");
+		return -EIO;
+	}
+	val |= data_rate;
+
+	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_CTRL_2, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_CTRL_2 write\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static enum data_rate_type at86rf2xx_get_data_rate(struct device *spi, struct spi_config *spi_cfg)
+{
+	uint8_t val;
+	int err;
+
+	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_CTRL_2, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_CTRL_2 write\n");
+		return -EIO;
+	}
+
+	val &= AT86RF2XX_TRX_CTRL_2_MASK__OQPSK_DATA_RATE;
+
+	return val;
 }
 
 static int at86rf2xx_disable_clock_output(struct device *spi, struct spi_config *spi_cfg)
@@ -796,7 +993,7 @@ static uint8_t at86rf2xx_get_status(struct device *spi, struct spi_config *spi_c
 		//return -EIO;
 	}
 
-	return val;
+	return val & AT86RF2XX_TRX_STATUS_MASK__TRX_STATUS;
 }
 
 static int at86rf2xx_reg_set_state(struct device *spi, struct spi_config *spi_cfg,
@@ -813,6 +1010,19 @@ static int at86rf2xx_reg_set_state(struct device *spi, struct spi_config *spi_cf
 	while (at86rf2xx_get_status(spi, spi_cfg) != state_);
 	state = state_;
 
+	return 0;
+}
+
+static int at86rf2xx_reg_set_state_a(struct device *spi, struct spi_config *spi_cfg,
+					uint8_t state_)
+{
+	int err;
+
+	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_STATE, &state_, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_STATE write\n");
+		return -EIO;
+	}
 
 	return 0;
 }
@@ -913,15 +1123,34 @@ static int at86rf2xx_tx_prepare(struct device *spi, struct spi_config *spi_cfg)
 	at86rf2xx_set_state(spi, spi_cfg, AT86RF2XX_STATE_TX_ARET_ON);
 	frame_len = 2;
 
+	return 0;
 }
 
 static size_t at86rf2xx_tx_load(struct device *spi, struct spi_config *spi_cfg,
-					uint8_t *data, size_t len, size_t offset)
+					uint8_t addr, uint8_t *data, size_t len)
 {
 	frame_len += (uint8_t)len;
 
+	at86rf2xx_write_sram(spi, spi_cfg, addr+1, data, len);
+
+	return addr + len;
 }
 
+static int at86rf2xx_tx_exec(struct device *spi, struct spi_config *spi_cfg)
+{
+	uint8_t val = AT86RF2XX_TRX_STATE__TX_START;
+	int err;
+
+	at86rf2xx_write_sram(spi, spi_cfg, 0, &(frame_len), 1);
+
+	err = write_reg(spi, spi_cfg, AT86RF2XX_REG__TRX_STATE, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_STATE write\n");
+		return -EIO;
+	}
+
+	return 0;
+}
 
 static size_t at86rf2xx_send(struct device *spi, struct spi_config *spi_cfg,
 					uint8_t *data, size_t len)
@@ -932,33 +1161,81 @@ static size_t at86rf2xx_send(struct device *spi, struct spi_config *spi_cfg,
 	}
 
 	at86rf2xx_tx_prepare(spi, spi_cfg);
-	at86rf2xx_tx_load(spi, spi_cfg, data, len, 0);
-	/* TODO: WIP */
-	//at86rf2xx_tx_exec();
+	at86rf2xx_tx_load(spi, spi_cfg, 0x00, data, len);
+	at86rf2xx_tx_exec(spi, spi_cfg);
 
 	return len;
 }
 
 void irq_handler(struct device *gpioc, struct gpio_callback *cb, uint32_t pins)
 {
-	printk("%s %s() %dLine\n", __FILE__, __func__, __LINE__);
+	k_work_submit(&data_read_work);
 }
+
+size_t at86rf2xx_rx_len()
+{
+	uint8_t phr;
+
+	at86rf2xx_read_sram(spi, &spi_cfg, 0x00, &phr, 1);
+
+	return (size_t)((phr & 0x7f) - 2);
+}
+
+void at86rf2xx_receive_data(void)
+{
+	size_t pkt_len;
+	uint8_t sram_data[128];
+	int i;
+
+	pkt_len = at86rf2xx_rx_len();
+	printf("read %dbyte\n", pkt_len);
+
+	at86rf2xx_read_sram(spi, &spi_cfg, 0x01, sram_data, pkt_len);
+	printk("data[%d]: ", pkt_len);
+	for (i = 0; i < pkt_len; i++)
+		printf("0x%x ", sram_data[i]);
+	printk("\n\n");
+}
+
+static void data_read_work_handler(struct k_work *work)
+{
+	uint8_t state, irq_mask;
+	int err;
+
+	state = at86rf2xx_get_status(spi, &spi_cfg);
+	if (state == AT86RF2XX_STATE_SLEEP)
+		return;
+
+	err = read_reg(spi, &spi_cfg, AT86RF2XX_REG__IRQ_STATUS, &irq_mask, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__IRQ_STATUS write\n");
+		return;
+	}
+
+	if (irq_mask & AT86RF2XX_IRQ_STATUS_MASK__RX_START)
+		printk("[at86rf2xx] EVT - RX_START\n");
+
+	if (irq_mask & AT86RF2XX_IRQ_STATUS_MASK__TRX_END) {
+		if(state == AT86RF2XX_STATE_RX_AACK_ON || state == AT86RF2XX_STATE_BUSY_RX_AACK) {
+			printk("[at86rf2xx] EVT - RX_END\n");
+			at86rf2xx_receive_data();
+		}
+	}
+}
+
 
 void main(void)
 {
-	struct device *spi;
 	struct device *reset;
 	struct device *irq;
 	struct gpio_callback irq_cb;
 	struct spi_cs_control spi_cs;
-	struct spi_config spi_cfg;
 	uint64_t ieee_addr;
 	uint16_t short_addr, pan_id, channel;
-	int8_t tx_power;
+	uint8_t sfd, data_rate, tx_power, tx_test_data[23];
 	int err;
 
-	printk("AT86RF2XX(2.4GHz Transceiver) example application\n");
-	printk("\n");
+	printk("AT86RF2XX(2.4GHz Transceiver) example application\n\n");
 
 	spi = device_get_binding(DT_ATMEL_AT86RF2XX_0_BUS_NAME);
 	if (!spi) {
@@ -1008,25 +1285,28 @@ void main(void)
 	gpio_add_callback(irq, &irq_cb);
 	gpio_pin_enable_callback(irq, DT_ATMEL_AT86RF2XX_0_IRQ_GPIOS_PIN);
 
-
 	err = at86rf2xx_assert_awake(spi, &spi_cfg);
 	if (err) {
 		printk("Error during at86rf2xx_assert_awake()\n");
 		return;
 	}
 
+
+	/* Part Number */
 	err = at86rf2xx_part_number(spi, &spi_cfg);
 	if (err) {
 		printk("Could not verify AT86RF2XX part number\n");
 		return;
 	}
 
+	/* Version Number */
 	err = at86rf2xx_version_number(spi, &spi_cfg);
 	if (err) {
 		printk("Could not verify AT86RF2XX version number\n");
 		return;
 	}
 
+	/* Manufacturer ID */
 	err = at86rf2xx_man_id(spi, &spi_cfg);
 	if (err) {
 		printk("Could not verify AT86RF2XX main id\n");
@@ -1035,12 +1315,13 @@ void main(void)
 
 #ifdef IEEE802154_USE
 	/* SHORT ADDR */
-	err = at86rf2xx_write_short_addr(spi, &spi_cfg, AT86RF2XX_DEFAULT_SHORT_ADDR);
+	err = at86rf2xx_set_short_addr(spi, &spi_cfg, AT86RF2XX_DEFAULT_SHORT_ADDR);
 	if (err) {
 		printk("Could not write short_addr:0x%x\n", AT86RF2XX_DEFAULT_SHORT_ADDR);
 		return;
 	}
-	short_addr = at86rf2xx_read_short_addr(spi, &spi_cfg);
+
+	short_addr = at86rf2xx_get_short_addr(spi, &spi_cfg);
 	if (short_addr < 0) {
 		printk("Could not read short addr\n");
 		return;
@@ -1049,12 +1330,13 @@ void main(void)
 	}
 
 	/* PAN ID */
-	err = at86rf2xx_write_pan_id(spi, &spi_cfg, AT86RF2XX_DEFAULT_PAN_ID);
+	err = at86rf2xx_set_pan_id(spi, &spi_cfg, AT86RF2XX_DEFAULT_PAN_ID);
 	if (err) {
 		printk("Could not write pan id:0x%x\n", AT86RF2XX_DEFAULT_PAN_ID);
 		return;
 	}
-	pan_id = at86rf2xx_read_pan_id(spi, &spi_cfg);
+
+	pan_id = at86rf2xx_get_pan_id(spi, &spi_cfg);
 	if (pan_id < 0) {
 		printk("Could not read pan id\n");
 		return;
@@ -1063,12 +1345,13 @@ void main(void)
 	}
 
 	/* IEEE ADDR */
-	err = at86rf2xx_write_ieee_addr(spi, &spi_cfg, AT86RF2XX_DEFAULT_IEEE_ADDR);
+	err = at86rf2xx_set_ieee_addr(spi, &spi_cfg, AT86RF2XX_DEFAULT_IEEE_ADDR);
 	if (err) {
 		printk("Could not write ieee addr:0x%llx\n", AT86RF2XX_DEFAULT_IEEE_ADDR);
 		return;
 	}
-	ieee_addr = at86rf2xx_read_ieee_addr(spi, &spi_cfg);
+
+	ieee_addr = at86rf2xx_get_ieee_addr(spi, &spi_cfg);
 	if (ieee_addr < 0) {
 		printk("Could not read ieee addr\n");
 		return;
@@ -1077,43 +1360,46 @@ void main(void)
 	}
 
 	/* Channel */
-	err = at86rf2xx_write_channel(spi, &spi_cfg, AT86RF2XX_DEFAULT_CHANNEL);
+	err = at86rf2xx_set_channel(spi, &spi_cfg, AT86RF2XX_DEFAULT_CHANNEL);
 	if (err) {
 		printk("Could not write channel:0x%x\n", AT86RF2XX_DEFAULT_CHANNEL);
 		return;
 	}
-	channel = at86rf2xx_read_channel(spi, &spi_cfg);
+
+	channel = at86rf2xx_get_channel(spi, &spi_cfg);
 	if (channel < 0) {
 		printk("Could not read channel\n");
 		return;
 	} else {
 		printk("channel:%d\n", channel);
 	}
-#endif
 
-#ifdef IEEE802154_USE
-	/* Option */
+	/* IEEE 802.15.4 Option */
 	options = 0;
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_PROMISCUOUS, true);
 	if (err) {
 		printk("Could not set option: AT86RF2XX_OPT_PROMISCUOUS");
 		return;
 	}
+
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_AUTOACK, true);
 	if (err) {
 		printk("Could not set option: AT86RF2XX_OPT_AUTOACK");
 		return;
 	}
+
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_CSMA, true);
 	if (err) {
 		printk("Could not set option: AT86RF2XX_OPT_CSMA");
 		return;
 	}
+
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_TELL_RX_START, true);
 	if (err) {
 		printk("Could not set option: AT86RF2XX_OPT_TELL_RX_START");
 		return;
 	}
+
 	/* Not yet supported. */
 	/*
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_TELL_RX_END, true);
@@ -1122,15 +1408,23 @@ void main(void)
 		return;
 	}
 	*/
-
-	/* Rx Safe Mode */
-	err = at86rf2xx_enable_rx_safe_mode(spi, &spi_cfg);
+#else
+	/* SFD(Start-Of-Frame Delimiter) */
+	err = at86rf2xx_set_sfd(spi, &spi_cfg, 0x12);
 	if (err) {
-		printk("Error during at86rf2xx_enable_rx_safe_mode()\n");
+		printk("Error during at86rf2xx_set_sfd()\n");
 		return;
 	}
-#else
-	/* Option */
+
+	sfd = at86rf2xx_get_sfd(spi, &spi_cfg);
+	if (err) {
+		printk("Error during at86rf2xx_get_sfd()\n");
+		return;
+	} else {
+		printk("sfd: 0x%x\n", sfd);
+	}
+
+	/* Extended Operating Mode Option */
 	options = 0;
 	err = at86rf2xx_set_option(spi, &spi_cfg, AT86RF2XX_OPT_PROMISCUOUS, true);
 	if (err) {
@@ -1138,6 +1432,58 @@ void main(void)
 		return;
 	}
 #endif
+
+	/* Rx Safe Mode */
+	err = at86rf2xx_enable_rx_safe_mode(spi, &spi_cfg);
+	if (err) {
+		printk("Error during at86rf2xx_enable_rx_safe_mode()\n");
+		return;
+	}
+
+	/* Data Rate */
+	err = at86rf2xx_set_data_rate(spi, &spi_cfg, TWO_MBPS);
+	if (err) {
+		printk("Error during at86rf2xx_set_data_rate()\n");
+		return;
+	}
+
+	data_rate = at86rf2xx_get_data_rate(spi, &spi_cfg);
+	if (data_rate < 0) {
+		printk("Error during at86rf2xx_get_data_rate()\n");
+		return;
+	} else {
+		switch (data_rate) {
+		case TWO_FIVE_ZERO_KBPS:
+			printf("DATA RATE: 250kb/s\n");
+			break;
+		case FIVE_ZERO_ZERO_KBPS:
+			printf("DATA RATE: 500kb/s\n");
+			break;
+		case ONE_MBPS:
+			printf("DATA RATE: 1000kb/s\n");
+			break;
+		case TWO_MBPS:
+			printf("DATA RATE: 2000kb/s\n");
+			break;
+		default:
+			break;
+		}
+	}
+
+	/* Tx Power */
+	err = at86rf2xx_set_tx_power(spi, &spi_cfg, 0);
+	if (err) {
+		printk("Error during at86rf2xx_set_tx_power()\n");
+		return;
+	}
+
+	tx_power = at86rf2xx_get_tx_power(spi, &spi_cfg);
+	if (tx_power == -128) {
+		printk("Error during at86rf2xx_get_tx_power()\n");
+		return;
+	} else {
+		printk("tx_power: %d[dBm]\n", tx_power);
+	}
 
 	/* disable clock output to save power */
 	err = at86rf2xx_disable_clock_output(spi, &spi_cfg);
@@ -1153,6 +1499,9 @@ void main(void)
 		return;
 	}
 
+	/* XXX: I do not know why I need it. But without it, it does not work. */
+	at86rf2xx_reg_set_state_a(spi, &spi_cfg, 0x03);
+
 	/* go into RX state */
 	err = at86rf2xx_set_state(spi, &spi_cfg, AT86RF2XX_STATE_RX_AACK_ON);
 	if (err) {
@@ -1160,9 +1509,45 @@ void main(void)
 		return;
 	}
 
-	printk("setting end\n");
-	while (1)
+	/* Data read workqueue */
+	k_work_init(&data_read_work, data_read_work_handler);
+
+	tx_test_data[0] = 0x12;
+	tx_test_data[1] = 0x34;
+	tx_test_data[2] = 0x56;
+	tx_test_data[3] = 0x78;
+	tx_test_data[4] = 0x9A;
+	tx_test_data[5] = 0xBC;
+	tx_test_data[6] = 0xDE;
+	tx_test_data[7] = 0xFF;
+	tx_test_data[8] = 0x11;
+	tx_test_data[9] = 0x22;
+	tx_test_data[10] = 0x33;
+	tx_test_data[11] = 0x44;
+	tx_test_data[12] = 0x55;
+	tx_test_data[13] = 0x66;
+	tx_test_data[14] = 0x77;
+	tx_test_data[15] = 0x88;
+	tx_test_data[16] = 0x99;
+	tx_test_data[17] = 0xAA;
+	tx_test_data[18] = 0xBB;
+	tx_test_data[19] = 0xCC;
+	tx_test_data[20] = 0xDD;
+	tx_test_data[21] = 0xEE;
+	tx_test_data[22] = 0xFF;
+
+
+	printk("\nsetting end\n");
+
+	while (1) {
+#ifdef WRITE
+		/* Transfer data at 1 second intervals */
+		at86rf2xx_send(spi, &spi_cfg, tx_test_data, sizeof(tx_test_data));
+#endif
 		k_sleep(1000);
+	}
 
 	printk("application end\n");
+
+	return;
 }
