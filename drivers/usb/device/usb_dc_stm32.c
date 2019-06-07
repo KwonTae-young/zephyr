@@ -144,6 +144,7 @@ struct usb_dc_stm32_ep_state {
 	u32_t read_count;	/** Number of bytes in read buffer  */
 	u32_t read_offset;	/** Current offset in read buffer */
 	struct k_sem write_sem;	/** Write boolean semaphore */
+	u16_t write_sem_retry;
 };
 
 /* Driver state */
@@ -738,6 +739,12 @@ int usb_dc_ep_write(const u8_t ep, const u8_t *const data,
 	ret = k_sem_take(&ep_state->write_sem, K_NO_WAIT);
 	if (ret) {
 		LOG_ERR("Unable to get write lock (%d)", ret);
+		if (ep_state->write_sem_retry > 10000) {
+			k_sem_give(&ep_state->write_sem);
+		} else {
+			ep_state->write_sem_retry++;
+		}
+
 		return -EAGAIN;
 	}
 
@@ -1009,6 +1016,7 @@ void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, u8_t epnum)
 
 	LOG_DBG("epnum 0x%02x", epnum);
 
+	ep_state->write_sem_retry = 0;
 	k_sem_give(&ep_state->write_sem);
 
 	if (ep_state->cb) {
