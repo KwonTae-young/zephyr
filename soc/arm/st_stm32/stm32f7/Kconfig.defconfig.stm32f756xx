@@ -23,6 +23,6 @@ endif # GPIO_STM32
 
 config NUM_IRQS
 	int
-	default 98
+	default 97
 
 endif # SOC_STM32F756XX

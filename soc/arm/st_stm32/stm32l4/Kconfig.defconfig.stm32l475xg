@@ -13,7 +13,7 @@ config SOC
 
 config NUM_IRQS
 	int
-	default 82
+	default 80
 
 if GPIO_STM32
 

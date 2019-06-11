@@ -13,6 +13,6 @@ config SOC
 
 config NUM_IRQS
 	int
-	default 104
+	default 110
 
 endif # SOC_STM32F723XE

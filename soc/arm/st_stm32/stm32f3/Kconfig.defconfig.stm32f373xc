@@ -17,7 +17,7 @@ config FLASH_PAGE_SIZE
 
 config NUM_IRQS
 	int
-	default 82
+	default 60
 
 if GPIO_STM32
 
