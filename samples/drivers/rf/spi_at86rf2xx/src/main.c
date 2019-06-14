@@ -102,6 +102,7 @@
 #define AT86RF2XX_CSMA_SEED_1__AACK_DIS_ACK		0x10
 #define AT86RF2XX_CSMA_SEED_1__CSMA_SEED_1		0x07
 
+#define AT86RF2XX_PHY_RSSI_MASK__RX_CRC_VALID		0x80
 
 #define AT86RF2XX_OPT_AUTOACK		0x0001      /**< auto ACKs active */
 #define AT86RF2XX_OPT_CSMA		0x0002       /**< CSMA active */
@@ -1167,6 +1168,23 @@ static size_t at86rf2xx_send(struct device *spi, struct spi_config *spi_cfg,
 	return len;
 }
 
+static uint8_t at86rf2xx_fcs_valid_check(struct device *spi, struct spi_config *spi_cfg)
+{
+	uint8_t val;
+	int err;
+
+	err = read_reg(spi, spi_cfg, AT86RF2XX_REG__PHY_RSSI, &val, 1);
+	if (err) {
+		printk("Error during AT86RF2XX_REG__TRX_STATUS read\n");
+		return -EIO;
+	}
+
+	if (val & AT86RF2XX_PHY_RSSI_MASK__RX_CRC_VALID)
+		return 0;
+	else
+		return -EIO;
+}
+
 void irq_handler(struct device *gpioc, struct gpio_callback *cb, uint32_t pins)
 {
 	k_work_submit(&data_read_work);
@@ -1185,14 +1203,20 @@ void at86rf2xx_receive_data(void)
 {
 	size_t pkt_len;
 	uint8_t sram_data[128];
-	int i;
+	int err;
+
+	err = at86rf2xx_fcs_valid_check(spi, &spi_cfg);
+	if (err) {
+		printk("FCS is not valid\n");
+		return;
+	}
 
 	pkt_len = at86rf2xx_rx_len();
 	printf("read %dbyte\n", pkt_len);
 
 	at86rf2xx_read_sram(spi, &spi_cfg, 0x01, sram_data, pkt_len);
 	printk("data[%d]: ", pkt_len);
-	for (i = 0; i < pkt_len; i++)
+	for (int i = 0; i < pkt_len; i++)
 		printf("0x%x ", sram_data[i]);
 	printk("\n\n");
 }
