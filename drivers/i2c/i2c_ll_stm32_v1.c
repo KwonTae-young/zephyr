@@ -25,6 +25,8 @@ LOG_MODULE_REGISTER(i2c_ll_stm32_v1);
 #define I2C_REQUEST_READ	0x01
 #define HEADER			0xF0
 
+#define STM32_I2C_TIMEOUT_USEC	1000
+
 #ifdef CONFIG_I2C_STM32_INTERRUPT
 static inline void handle_sb(I2C_TypeDef *i2c, struct i2c_stm32_data *data)
 {
@@ -307,7 +309,7 @@ s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg,
 	const struct i2c_stm32_config *cfg = DEV_CFG(dev);
 	struct i2c_stm32_data *data = DEV_DATA(dev);
 	I2C_TypeDef *i2c = cfg->i2c;
-	u32_t len = msg->len;
+	u32_t timeout, len = msg->len;
 	u8_t *buf = msg->buf;
 
 	ARG_UNUSED(next_msg_flags);
@@ -316,7 +318,14 @@ s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg,
 
 	if (msg->flags & I2C_MSG_RESTART) {
 		LL_I2C_GenerateStartCondition(i2c);
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (!LL_I2C_IsActiveFlag_SB(i2c)) {
+			if (timeout <= 0) {
+				LL_I2C_GenerateStopCondition(i2c);
+				return -EIO;
+			}
+			k_busy_wait(1);
+			timeout--;
 		}
 
 		if (I2C_ADDR_10_BITS & data->dev_config) {
@@ -324,7 +333,14 @@ s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg,
 			u8_t header = slave | HEADER;
 
 			LL_I2C_TransmitData8(i2c, header);
+			timeout = STM32_I2C_TIMEOUT_USEC;
 			while (!LL_I2C_IsActiveFlag_ADD10(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			slave = data->slave_address & 0xFF;
@@ -334,37 +350,51 @@ s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg,
 
 			LL_I2C_TransmitData8(i2c, slave | I2C_REQUEST_WRITE);
 		}
+
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (!LL_I2C_IsActiveFlag_ADDR(i2c)) {
-			if (LL_I2C_IsActiveFlag_AF(i2c)) {
+			if (LL_I2C_IsActiveFlag_AF(i2c) || timeout <= 0) {
 				LL_I2C_ClearFlag_AF(i2c);
 				LL_I2C_GenerateStopCondition(i2c);
 				LOG_DBG("%s: NACK", __func__);
 
 				return -EIO;
 			}
+			k_busy_wait(1);
+			timeout--;
 		}
 		LL_I2C_ClearFlag_ADDR(i2c);
 	}
 
 	while (len) {
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (1) {
 			if (LL_I2C_IsActiveFlag_TXE(i2c)) {
 				break;
 			}
-			if (LL_I2C_IsActiveFlag_AF(i2c)) {
+			if (LL_I2C_IsActiveFlag_AF(i2c) || timeout <= 0) {
 				LL_I2C_ClearFlag_AF(i2c);
 				LL_I2C_GenerateStopCondition(i2c);
 				LOG_DBG("%s: NACK", __func__);
 
 				return -EIO;
 			}
+			k_busy_wait(1);
+			timeout--;
 		}
 		LL_I2C_TransmitData8(i2c, *buf);
 		buf++;
 		len--;
 	}
 
+	timeout = STM32_I2C_TIMEOUT_USEC;
 	while (!LL_I2C_IsActiveFlag_BTF(i2c)) {
+		if (timeout <= 0) {
+			LL_I2C_GenerateStopCondition(i2c);
+			return -EIO;
+		}
+		k_busy_wait(1);
+		timeout--;
 	}
 
 	if (msg->flags & I2C_MSG_STOP) {
@@ -380,7 +410,7 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 	const struct i2c_stm32_config *cfg = DEV_CFG(dev);
 	struct i2c_stm32_data *data = DEV_DATA(dev);
 	I2C_TypeDef *i2c = cfg->i2c;
-	u32_t len = msg->len;
+	u32_t timeout, len = msg->len;
 	u8_t *buf = msg->buf;
 
 	ARG_UNUSED(next_msg_flags);
@@ -389,7 +419,14 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 
 	if (msg->flags & I2C_MSG_RESTART) {
 		LL_I2C_GenerateStartCondition(i2c);
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (!LL_I2C_IsActiveFlag_SB(i2c)) {
+			if (timeout <= 0) {
+				LL_I2C_GenerateStopCondition(i2c);
+				return -EIO;
+			}
+			k_busy_wait(1);
+			timeout--;
 		}
 
 		if (I2C_ADDR_10_BITS & data->dev_config) {
@@ -397,17 +434,38 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 			u8_t header = slave | HEADER;
 
 			LL_I2C_TransmitData8(i2c, header);
+			timeout = STM32_I2C_TIMEOUT_USEC;
 			while (!LL_I2C_IsActiveFlag_ADD10(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			slave = saddr & 0xFF;
 			LL_I2C_TransmitData8(i2c, slave);
+			timeout = STM32_I2C_TIMEOUT_USEC;
 			while (!LL_I2C_IsActiveFlag_ADDR(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			LL_I2C_ClearFlag_ADDR(i2c);
 			LL_I2C_GenerateStartCondition(i2c);
+			timeout = STM32_I2C_TIMEOUT_USEC;
 			while (!LL_I2C_IsActiveFlag_SB(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			header |= I2C_REQUEST_READ;
@@ -418,14 +476,17 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 			LL_I2C_TransmitData8(i2c, slave | I2C_REQUEST_READ);
 		}
 
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (!LL_I2C_IsActiveFlag_ADDR(i2c)) {
-			if (LL_I2C_IsActiveFlag_AF(i2c)) {
+			if (LL_I2C_IsActiveFlag_AF(i2c) || timeout <= 0) {
 				LL_I2C_ClearFlag_AF(i2c);
 				LL_I2C_GenerateStopCondition(i2c);
 				LOG_DBG("%s: NACK", __func__);
 
 				return -EIO;
 			}
+			k_busy_wait(1);
+			timeout--;
 		}
 
 		if (len == 1U) {
@@ -441,9 +502,17 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 	}
 
 	while (len) {
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		while (!LL_I2C_IsActiveFlag_RXNE(i2c)) {
-			;
+			if (timeout <= 0) {
+				LL_I2C_GenerateStopCondition(i2c);
+				return -EIO;
+			}
+			k_busy_wait(1);
+			timeout--;
 		}
+
+		timeout = STM32_I2C_TIMEOUT_USEC;
 		switch (len) {
 		case 1:
 			if (msg->flags & I2C_MSG_STOP) {
@@ -455,6 +524,12 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 			break;
 		case 2:
 			while (!LL_I2C_IsActiveFlag_BTF(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			/*
@@ -474,6 +549,12 @@ s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg,
 			break;
 		case 3:
 			while (!LL_I2C_IsActiveFlag_BTF(i2c)) {
+				if (timeout <= 0) {
+					LL_I2C_GenerateStopCondition(i2c);
+					return -EIO;
+				}
+				k_busy_wait(1);
+				timeout--;
 			}
 
 			/* Set NACK before reading N-2 byte*/
