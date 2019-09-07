@@ -88,6 +88,9 @@ manifest:
     - name: open-amp
       revision: 9b591b289e1f37339bd038b5a1f0e6c8ad39c63a
       path: modules/lib/open-amp
+    - name: loramac-node
+      revision: beb2a72f3cd4ab73739196c57bcde141f0492b1c
+      path: modules/lib/loramac-node
     - name: openthread
       revision: 3c32244f098f8daf8741efe0a2ad839b67f8567f
       path: modules/lib/openthread
