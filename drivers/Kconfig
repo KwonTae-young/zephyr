@@ -89,4 +89,6 @@ source "drivers/video/Kconfig"
 
 source "drivers/eeprom/Kconfig"
 
+source "drivers/iio/Kconfig"
+
 endmenu
