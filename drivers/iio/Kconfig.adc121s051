@@ -1,0 +1,13 @@
+#
+# Copyright (c) 2019 Kwon Tae-young <tykwon@m2i.co.kr>
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+menuconfig IIO_ADC121S051
+	bool "TI ADC121S051 driver"
+	select HAS_IIO_ADC121S051
+	depends on SPI
+	depends on GPIO
+	help
+	  Enable Industrial I/O driver for TI ADC121S051.

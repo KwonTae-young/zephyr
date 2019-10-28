@@ -26,5 +26,6 @@ config IIO_INIT_PRIORITY
 
 source "drivers/iio/Kconfig.sn65hvs885"
 source "drivers/iio/Kconfig.drv8804"
+source "drivers/iio/Kconfig.adc121s051"
 
 endif # IIO
