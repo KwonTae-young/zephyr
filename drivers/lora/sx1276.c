@@ -25,6 +25,10 @@ LOG_MODULE_REGISTER(sx1276);
 #define SX1276_REG_PA_DAC			0x4d
 #define SX1276_REG_VERSION			0x42
 
+/* TODO: Use RTC backup */
+static uint32_t backup_reg[2] = { 0 ,0 };
+static uint32_t saved_time;
+
 extern DioIrqHandler *DioIrq[];
 
 int sx1276_dio_pins[SX1276_MAX_DIO] = {
@@ -104,9 +108,14 @@ void BoardCriticalSectionEnd(uint32_t *mask)
 	irq_unlock(*mask);
 }
 
-uint32_t RtcGetTimerElapsedTime(void)
+uint32_t RtcGetTimerValue(void)
 {
 	return counter_read(dev_data.counter);
+}
+
+uint32_t RtcGetTimerElapsedTime(void)
+{
+	return (uint32_t)(counter_read(dev_data.counter) - saved_time);
 }
 
 u32_t RtcGetMinimumTimeout(void)
@@ -127,17 +136,52 @@ void RtcSetAlarm(uint32_t timeout)
 
 uint32_t RtcSetTimerContext(void)
 {
-	return 0;
+	saved_time = counter_read(dev_data.counter);
+
+	return (uint32_t)saved_time;
+}
+
+uint32_t RtcGetTimerContext(void)
+{
+	return saved_time;
 }
 
 uint32_t RtcMs2Tick(uint32_t milliseconds)
 {
-	return counter_us_to_ticks(dev_data.counter, (milliseconds / 1000));
+	return counter_us_to_ticks(dev_data.counter, (milliseconds * 1000));
+}
+
+uint32_t RtcTick2Ms(uint32_t tick)
+{
+	return (counter_ticks_to_us(dev_data.counter, tick) / 1000);
 }
 
 void DelayMsMcu(uint32_t ms)
 {
 	k_sleep(ms);
+}
+
+uint32_t RtcGetCalendarTime(uint16_t *milliseconds)
+{
+	u32_t time_us;
+
+	time_us = counter_ticks_to_us(dev_data.counter, counter_read(dev_data.counter));
+	*milliseconds = time_us / USEC_PER_MSEC;
+
+	/* Return in seconds */
+	return time_us / USEC_PER_SEC;
+}
+
+void RtcBkupWrite(uint32_t data0, uint32_t data1)
+{
+	backup_reg[0] = data0;
+	backup_reg[1] = data1;
+}
+
+void RtcBkupRead(uint32_t *data0, uint32_t *data1)
+{
+	*data0 = backup_reg[0];
+	*data1 = backup_reg[1];
 }
 
 static void sx1276_irq_callback(struct device *dev,
@@ -415,6 +459,7 @@ const struct Radio_s Radio = {
 	.WriteBuffer = SX1276WriteBuffer,
 	.ReadBuffer = SX1276ReadBuffer,
 	.SetMaxPayloadLength = SX1276SetMaxPayloadLength,
+	.SetPublicNetwork = SX1276SetPublicNetwork,
 	.IrqProcess = NULL,
 	.RxBoosted = NULL,
 	.SetRxDutyCycle = NULL,
@@ -476,6 +521,10 @@ static int sx1276_lora_init(struct device *dev)
 		LOG_ERR("Cannot get pointer to %s device", DT_RTC_0_NAME);
 		return -EIO;
 	}
+
+#ifdef CONFIG_LORAWAN
+	counter_start(dev_data.counter);
+#endif
 
 	k_sem_init(&dev_data.data_sem, 0, UINT_MAX);
 
