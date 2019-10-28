@@ -24,4 +24,6 @@ config IIO_INIT_PRIORITY
 	help
 	  System initialization priority for Industrial I/O drivers.
 
+source "drivers/iio/Kconfig.sn65hvs885"
+
 endif # IIO
