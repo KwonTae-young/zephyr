@@ -221,37 +221,30 @@ int sx1276_read(u8_t reg_addr, u8_t *data, u8_t len)
 	return sx1276_transceive(reg_addr, false, data, len);
 }
 
-int sx1276_write(u8_t reg_addr, u8_t byte)
+int sx1276_write(u8_t reg_addr, u8_t *data, u8_t len)
 {
-	return sx1276_transceive(reg_addr | BIT(7), true, &byte, 1);
+	return sx1276_transceive(reg_addr | BIT(7), true, data, len);
 }
 
 void SX1276WriteBuffer(u16_t addr, u8_t *buffer, u8_t size)
 {
-	int ret, i;
+	int ret;
 
-	for (i = 0; i < size; i++) {
-		ret = sx1276_write(addr, buffer[i]);
-		if (ret < 0) {
-			LOG_ERR("Unable to read address: %x", addr);
-			return;
-		}
+	ret = sx1276_write(addr, buffer, size);
+	if (ret < 0) {
+		LOG_ERR("Unable to read address: %x", addr);
+		return;
 	}
 }
 
 void SX1276ReadBuffer(u16_t addr, u8_t *buffer, u8_t size)
 {
-	int ret, i;
-	u8_t regval;
+	int ret;
 
-	for (i = 0; i < size; i++) {
-		ret = sx1276_read(addr, &regval, 1);
-		if (ret < 0) {
-			LOG_ERR("Unable to read address: %x", addr);
-			return;
-		}
-
-		buffer[i] = regval;
+	ret = sx1276_read(addr, buffer, size);
+	if (ret < 0) {
+		LOG_ERR("Unable to read address: %x", addr);
+		return;
 	}
 }
 
@@ -314,13 +307,13 @@ void SX1276SetRfTxPower(int8_t power)
 	pa_config = (pa_config & RF_PACONFIG_OUTPUTPOWER_MASK) |
 			     ((power + 1) & 0x0F);
 #endif
-	ret = sx1276_write(SX1276_REG_PA_CONFIG, pa_config);
+	ret = sx1276_write(SX1276_REG_PA_CONFIG, &pa_config, 1);
 	if (ret < 0) {
 		LOG_ERR("Unable to write PA config");
 		return;
 	}
 
-	ret = sx1276_write(SX1276_REG_PA_DAC, pa_dac);
+	ret = sx1276_write(SX1276_REG_PA_DAC, &pa_dac, 1);
 	if (ret < 0) {
 		LOG_ERR("Unable to write PA dac");
 		return;
