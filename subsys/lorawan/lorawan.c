@@ -154,7 +154,8 @@ static void MlmeIndication( MlmeIndication_t *mlmeIndication )
 	LOG_INF("MlmeIndication!");	
 }
 
-int lorawan_config(struct lorawan_mib_config *mib_config)
+int lorawan_config(struct lorawan_mib_config *mib_config,
+				enum lorawan_act_type mode)
 {
 	MibRequestConfirm_t mibReq;
 
@@ -169,6 +170,35 @@ int lorawan_config(struct lorawan_mib_config *mib_config)
 	mibReq.Type = MIB_JOIN_EUI;
 	mibReq.Param.JoinEui = mib_config->join_eui;
 	LoRaMacMibSetRequestConfirm(&mibReq);
+
+	if (mode == LORAWAN_ACT_ABP) {
+		mibReq.Type = MIB_NET_ID;
+		mibReq.Param.NetID = mib_config->net_id;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+
+		if (mib_config->dev_addr == 0) {
+			mib_config->dev_addr = randr(0, 0x01FFFFFF);
+		}
+		mibReq.Type = MIB_DEV_ADDR;
+		mibReq.Param.DevAddr = mib_config->dev_addr;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+
+		mibReq.Type = MIB_F_NWK_S_INT_KEY;
+		mibReq.Param.FNwkSIntKey = mib_config->f_nwk_s_int_key;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+
+		mibReq.Type = MIB_S_NWK_S_INT_KEY;
+		mibReq.Param.SNwkSIntKey = mib_config->s_nwk_s_int_key;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+
+		mibReq.Type = MIB_NWK_S_ENC_KEY;
+		mibReq.Param.NwkSEncKey = mib_config->nwk_s_enc_key;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+
+		mibReq.Type = MIB_APP_S_KEY;
+		mibReq.Param.AppSKey = mib_config->app_s_key;
+		LoRaMacMibSetRequestConfirm(&mibReq);
+	}
 
 	mibReq.Type = MIB_DEVICE_CLASS;
 	mibReq.Param.Class = mib_config->lw_class;
@@ -213,6 +243,16 @@ static LoRaMacStatus_t lorawan_join_otaa(enum lorawan_datarate datarate)
 	return LoRaMacMlmeRequest(&mlmeReq);
 }
 
+static LoRaMacStatus_t lorawan_join_abp(void)
+{
+	MibRequestConfirm_t mibReq;
+
+	mibReq.Type = MIB_NETWORK_ACTIVATION;
+	mibReq.Param.NetworkActivation = ACTIVATION_TYPE_ABP;
+
+	return LoRaMacMibSetRequestConfirm(&mibReq);
+}
+
 int lorawan_join_network(enum lorawan_datarate datarate, enum lorawan_act_type mode)
 {
 	LoRaMacStatus_t status;
@@ -222,7 +262,14 @@ int lorawan_join_network(enum lorawan_datarate datarate, enum lorawan_act_type m
 		if (status != LORAMAC_STATUS_OK) {
 			LOG_ERR("OTAA join failed: %s",
 				log_strdup(to_status_str[status]));
-			return -EINVAL;	
+			return -EINVAL;
+		}
+	} else {
+		status = lorawan_join_abp();
+		if (status != LORAMAC_STATUS_OK) {
+			LOG_ERR("ABP join failed: %s",
+				log_strdup(to_status_str[status]));
+			return -EINVAL;
 		}
 	}
 

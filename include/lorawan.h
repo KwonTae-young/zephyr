@@ -49,15 +49,22 @@ struct lorawan_mib_config {
 	enum lorawan_class lw_class;
 	enum lorawan_datarate rx2_datarate;
 	u32_t rx2_freq;
+	u32_t net_id;
+	u32_t dev_addr;
 	u8_t *dev_eui;
 	u8_t *join_eui;
 	u8_t *app_eui;
 	u8_t *app_key;
 	u8_t *nwk_key;
+	u8_t *f_nwk_s_int_key;
+	u8_t *s_nwk_s_int_key;
+	u8_t *nwk_s_enc_key;
+	u8_t *app_s_key;
 	bool adr_enable;
 };
 
-extern int lorawan_config(struct lorawan_mib_config *mib_config);
+extern int lorawan_config(struct lorawan_mib_config *mib_config,
+				enum lorawan_act_type mode);
 extern int lorawan_join_network(enum lorawan_datarate datarate,
 				enum lorawan_act_type mode);
 
