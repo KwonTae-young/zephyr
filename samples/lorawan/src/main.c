@@ -21,9 +21,13 @@
 					  0x09, 0xCF, 0x4F, 0x3C }
 #define LORAWAN_DEFAULT_DATARATE	LORAWAN_DR_0
 
+#define MAX_DATA_LEN 10
+
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <logging/log.h>
 LOG_MODULE_REGISTER(lora_receive);
+
+char data[MAX_DATA_LEN] = {'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'};
 
 void main(void)
 {
@@ -34,7 +38,6 @@ void main(void)
 	u8_t join_eui[] = LORAWAN_JOIN_EUI;
 	u8_t app_eui[] = LORAWAN_APP_EUI;
 	u8_t app_key[] = LORAWAN_APP_KEY;
-//	u8_t data[MAX_DATA_LEN] = {0};
 
 	lora_dev = device_get_binding(DT_INST_0_SEMTECH_SX1276_LABEL);
 	if (!lora_dev) {
@@ -61,6 +64,11 @@ void main(void)
 	ret = lorawan_join_network(LORAWAN_DEFAULT_DATARATE, LORAWAN_ACT_OTAA);
 	if (ret < 0)
 		return;
+	
+	ret = lorawan_send(2, LORAWAN_DEFAULT_DATARATE, data, MAX_DATA_LEN,
+			   true, 5);
+	if (ret < 0)
+		return;
 
-	LOG_INF("Network join request sent!");
+	LOG_INF("Data sent!");
 }
