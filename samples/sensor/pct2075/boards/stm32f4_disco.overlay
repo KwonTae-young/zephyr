@@ -1,0 +1,7 @@
+&i2c1 {
+	pct2075: pct2075@37 {
+		compatible = "nxp,pct2075";
+		reg = <0x37>;
+		label = "PCT2075";
+	};
+};

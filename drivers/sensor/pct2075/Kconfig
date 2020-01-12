@@ -1,0 +1,10 @@
+# PCT2075 temperature sensor configuration options
+
+# Copyright (c) 2020 Kwon Tae-young <tykwon@m2i.co.kr>
+# SPDX-License-Identifier: Apache-2.0
+
+config PCT2075
+	bool "PCT2075 Temperature Sensor"
+	depends on (I2C && HAS_DTS_I2C)
+	help
+	  Enable driver for PCT2075 temperature sensors.
