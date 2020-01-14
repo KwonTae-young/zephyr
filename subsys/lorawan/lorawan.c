@@ -101,6 +101,7 @@ LoRaMacCallback_t macCallbacks;
 
 void McpsConfirm(McpsConfirm_t *mcpsConfirm)
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mcpsConfirm->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsRequest failed : %s",
 			log_strdup(to_status_str[mcpsConfirm->Status]));
@@ -111,6 +112,7 @@ void McpsConfirm(McpsConfirm_t *mcpsConfirm)
 
 void McpsIndication(McpsIndication_t *mcpsIndication)
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mcpsIndication->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsIndication failed : %s",
 			log_strdup(to_status_str[mcpsIndication->Status]));
@@ -130,7 +132,7 @@ void McpsIndication(McpsIndication_t *mcpsIndication)
 void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 {
 	MibRequestConfirm_t mibGet;
-
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mlmeConfirm->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsIndication failed : %s",
 			log_strdup(to_status_str[mlmeConfirm->Status]));
@@ -155,6 +157,7 @@ void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 
 void MlmeIndication( MlmeIndication_t *mlmeIndication )
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	LOG_INF("MlmeIndication!");	
 }
 
@@ -230,6 +233,11 @@ int lorawan_join_network(enum lorawan_datarate datarate, enum lorawan_act_type m
 		}
 
 		LOG_INF("Network join request sent!");
+		while (1) {
+			//LOG_INF("LoRaMacProcess");
+			LoRaMacProcess();
+			k_sleep(1);
+		}
 
 		k_sem_take(&lorawan_config_sem, K_FOREVER);
 	}
