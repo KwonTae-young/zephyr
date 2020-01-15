@@ -11,6 +11,7 @@
 #include <zephyr.h>
 
 #include <sx1276/sx1276.h>
+#include <timer.h>
 
 #define LOG_LEVEL CONFIG_LORA_LOG_LEVEL
 #include <logging/log.h>
@@ -115,6 +116,12 @@ void BoardCriticalSectionEnd(uint32_t *mask)
 	irq_unlock(*mask);
 }
 
+static void counter_isr(struct device *counter_dev, u8_t chan_id,
+			u32_t ticks, void *user_data)
+{
+	TimerIrqHandler();
+}
+
 uint32_t RtcGetTimerValue(void)
 {
 	return counter_read(dev_data.counter);
@@ -137,6 +144,8 @@ void RtcSetAlarm(uint32_t timeout)
 
 	alarm_cfg.flags = 0;
 	alarm_cfg.ticks = timeout;
+	alarm_cfg.callback = counter_isr;
+	alarm_cfg.user_data = NULL;
 
 	counter_set_channel_alarm(dev_data.counter, 0, &alarm_cfg);
 }
