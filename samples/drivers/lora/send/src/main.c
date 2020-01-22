@@ -35,7 +35,7 @@ void main(void)
 	config.datarate = SF_10;
 	config.preamble_len = 8;
 	config.coding_rate = CR_4_5;
-	config.tx_power = 4;
+	config.tx_power = -1;
 	config.tx = true;
 
 	ret = lora_config(lora_dev, &config);
@@ -54,6 +54,6 @@ void main(void)
 		LOG_INF("Data sent!");
 
 		/* Send data at 1s interval */
-		k_sleep(1000);
+		k_sleep(10);
 	}
 }
