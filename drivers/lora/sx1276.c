@@ -119,6 +119,7 @@ void BoardCriticalSectionEnd(uint32_t *mask)
 static void counter_isr(struct device *counter_dev, u8_t chan_id,
 			u32_t ticks, void *user_data)
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	TimerIrqHandler();
 }
 
