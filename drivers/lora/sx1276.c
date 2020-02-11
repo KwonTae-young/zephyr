@@ -203,6 +203,8 @@ static void sx1276_irq_callback(struct device *dev,
 
 	for (i = 0; i < SX1276_MAX_DIO; i++) {
 		if (pin == sx1276_dio_pins[i]) {
+
+			printk("%s() %dLine i=%d\n", __func__, __LINE__, i);
 			(*DioIrq[i])(NULL);
 		}
 	}

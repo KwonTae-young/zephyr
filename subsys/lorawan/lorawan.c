@@ -101,6 +101,7 @@ static LoRaMacCallback_t macCallbacks;
 
 static void McpsConfirm(McpsConfirm_t *mcpsConfirm)
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mcpsConfirm->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsRequest failed : %s",
 			log_strdup(to_event_info_status_str[mcpsConfirm->Status]));
@@ -111,6 +112,7 @@ static void McpsConfirm(McpsConfirm_t *mcpsConfirm)
 
 static void McpsIndication(McpsIndication_t *mcpsIndication)
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mcpsIndication->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsIndication failed : %s",
 			log_strdup(to_event_info_status_str[mcpsIndication->Status]));
@@ -130,7 +132,7 @@ static void McpsIndication(McpsIndication_t *mcpsIndication)
 static void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 {
 	MibRequestConfirm_t mibGet;
-
+	printk("%s() %dLine\n", __func__, __LINE__);
 	if (mlmeConfirm->Status != LORAMAC_EVENT_INFO_STATUS_OK) {
 		LOG_ERR("McpsIndication failed : %s",
 			log_strdup(to_event_info_status_str[mlmeConfirm->Status]));
@@ -155,6 +157,7 @@ static void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 
 static void MlmeIndication( MlmeIndication_t *mlmeIndication )
 {
+	printk("%s() %dLine\n", __func__, __LINE__);
 	LOG_INF("MlmeIndication!");	
 }
 
