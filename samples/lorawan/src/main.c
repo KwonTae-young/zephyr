@@ -46,8 +46,8 @@ void main(void)
 	mib_config.app_eui = app_eui;
 	mib_config.app_key = app_key;
 	mib_config.nwk_key = app_key;
-	mib_config.rx2_datarate = LORAWAN_DEFAULT_DATARATE;
-	mib_config.rx2_freq = 865100000;
+	mib_config.rx2_datarate = LORAWAN_DR_2;
+	mib_config.rx2_freq = 866550000;
 	mib_config.adr_enable = true;
 
 	LOG_INF("Configuring MIB");
