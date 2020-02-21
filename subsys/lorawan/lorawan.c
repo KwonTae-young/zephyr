@@ -127,6 +127,7 @@ static void McpsIndication(McpsIndication_t *mcpsIndication)
 	/* TODO: Compliance test based on FPort value*/
 }
 
+bool joined = false;
 static void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 {
 	MibRequestConfirm_t mibGet;
@@ -142,6 +143,7 @@ static void MlmeConfirm( MlmeConfirm_t *mlmeConfirm )
 		mibGet.Type = MIB_DEV_ADDR;
 		LoRaMacMibGetRequestConfirm(&mibGet);
 		LOG_INF("Joined network! DevAddr: %08x", mibGet.Param.DevAddr);
+		joined = true;
 		break;
 	case MLME_LINK_CHECK:
 		/* Not implemented */
@@ -234,6 +236,10 @@ int lorawan_join_network(enum lorawan_datarate datarate, enum lorawan_act_type m
 		while(1) {
 			LoRaMacProcess();
 			k_sleep(500);
+
+			if (joined == true) {
+				break;
+			}
 		}
 
 		k_sem_take(&lorawan_config_sem, K_FOREVER);
