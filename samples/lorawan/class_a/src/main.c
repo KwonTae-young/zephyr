@@ -54,9 +54,6 @@ void main(void)
 	mib_config.app_key = app_key;
 	mib_config.nwk_key = app_key;
 	mib_config.adr_enable = true;
-	mib_config.join_acc_delay1 = 5000;
-	mib_config.join_acc_delay2 = 6000;
-	mib_config.system_max_rs_error = 20;
 
 	LOG_INF("Configuring MIB");
 	ret = lorawan_config(&mib_config);
