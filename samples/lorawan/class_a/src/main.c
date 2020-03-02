@@ -65,11 +65,15 @@ void main(void)
 	if (ret < 0)
 		return;
 	
-	LOG_INF("Sending data...");
-	ret = lorawan_send(2, LORAWAN_DEFAULT_DATARATE, data, MAX_DATA_LEN,
-			   true, 1);
-	if (ret < 0)
-		return;
+	while (1) {
+		LOG_INF("Sending data...");
+		ret = lorawan_send(2, LORAWAN_DEFAULT_DATARATE, data, MAX_DATA_LEN,
+				   true, 1);
+		if (ret < 0)
+			return;
 
-	LOG_INF("Data sent!");
+		LOG_INF("Data sent!");
+
+		k_sleep(K_SECONDS(5));
+	}
 }
