@@ -404,6 +404,17 @@ static void sx1276_rx_done(u8_t *payload, u16_t size, int16_t rssi, int8_t snr)
 	k_sem_give(&dev_data.data_sem);
 }
 
+static void sx1276_rx_error(void)
+{
+	Radio.Sleep();
+
+	dev_data.rx_len = 0;
+	dev_data.rssi = 0;
+	dev_data.snr = 0;
+
+	k_sem_give(&dev_data.data_sem);
+}
+
 static int sx1276_lora_recv(struct device *dev, u8_t *data, u8_t size,
 			    s32_t timeout, s16_t *rssi, s8_t *snr)
 {
@@ -428,8 +439,11 @@ static int sx1276_lora_recv(struct device *dev, u8_t *data, u8_t size,
 	}
 
 	/* Only copy the bytes that can fit the buffer, drop the rest */
-	if (dev_data.rx_len > size)
+	if (dev_data.rx_len > size) {
 		dev_data.rx_len = size;
+	} else if (dev_data.rx_len == 0) {
+		return -EIO;
+	}
 
 	/*
 	 * FIXME: We are copying the global buffer here, so it might get
@@ -465,7 +479,7 @@ static int sx1276_lora_config(struct device *dev,
 		Radio.SetRxConfig(MODEM_LORA, config->bandwidth,
 				  config->datarate, config->coding_rate,
 				  0, config->preamble_len, 10, false, 0,
-				  false, 0, 0, false, true);
+				  true, 0, 0, false, true);
 	}
 
 	return 0;
@@ -570,6 +584,7 @@ static int sx1276_lora_init(struct device *dev)
 
 	dev_data.sx1276_event.TxDone = sx1276_tx_done;
 	dev_data.sx1276_event.RxDone = sx1276_rx_done;
+	dev_data.sx1276_event.RxError = sx1276_rx_error;
 	dev_data.tx_done = true;
 	Radio.Init(&dev_data.sx1276_event);
 
