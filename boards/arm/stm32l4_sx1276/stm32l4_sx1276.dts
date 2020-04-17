@@ -1,0 +1,48 @@
+/*
+ * Copyright (c) 2020 M2I Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <st/l4/stm32l433Xb.dtsi>
+
+/ {
+	model = "STM32L4 SX1276";
+	compatible = "m2i,stm32l4-sx1276", "st,stm32l433";
+
+	chosen {
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+};
+
+&usart1 {
+	current-speed = <115200>;
+	status = "okay";
+};
+
+&spi1 {
+	status = "okay";
+	cs-gpios = <&gpioa 4 0>;
+
+ 	sx1276@0 {
+		compatible = "semtech,sx1276";
+		reg = <0>;
+		label = "sx1276";
+		reset-gpios = <&gpioc 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		dio-gpios = <&gpioc 5 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>,
+			<&gpiob 10 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>,
+			<&gpiob 11 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>,
+			<&gpioc 6 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>,
+			<&gpiob 0 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>;
+		ant-sw-gpios = <&gpioa 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>;
+		spi-max-frequency = <1000000>;
+	};
+};
+
+&rtc {
+	status = "okay";
+};

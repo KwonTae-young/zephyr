@@ -1,0 +1,10 @@
+# Kconfig - STM32L4 SX1276 board configuration
+#
+# Copyright (c) 2020 M2I Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+config BOARD_STM32L4_SX1276
+	bool "STM32L4 SX1276"
+	depends on SOC_STM32L433XX
