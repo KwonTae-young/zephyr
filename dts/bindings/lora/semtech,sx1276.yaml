@@ -24,3 +24,11 @@ properties:
         Up to six pins that produce service interrupts from the modem.
 
         These signals are normally active-high.
+
+    ant-sw-gpios:
+      type: phandle-array
+      required: false
+      description: |
+        GPIO to switch Tx/Rx when using RFO signal.
+
+        These signals are normally active-high.
