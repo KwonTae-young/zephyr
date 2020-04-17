@@ -21,6 +21,10 @@ LOG_MODULE_REGISTER(sx1276);
 #define GPIO_RESET_PIN		DT_INST_GPIO_PIN(0, reset_gpios)
 #define GPIO_RESET_FLAGS	DT_INST_GPIO_FLAGS(0, reset_gpios)
 #define GPIO_CS_PIN		DT_INST_SPI_DEV_CS_GPIOS_PIN(0)
+#ifdef CONFIG_PA_RFO_PIN
+#define GPIO_ANT_SW_PIN	DT_INST_0_SEMTECH_SX1276_ANT_SW_GPIOS_PIN
+#define GPIO_ANT_SW_FLAGS	DT_INST_0_SEMTECH_SX1276_ANT_SW_GPIOS_FLAGS
+#endif
 
 #define SX1276_REG_PA_CONFIG			0x09
 #define SX1276_REG_PA_DAC			0x4d
@@ -52,6 +56,9 @@ static const struct sx1276_dio sx1276_dios[] = { SX1276_DIO_GPIO_INIT(0) };
 struct sx1276_data {
 	struct device *counter;
 	struct device *reset;
+#ifdef CONFIG_PA_RFO_PIN
+	struct device *ant_sw;
+#endif
 	struct device *spi;
 	struct spi_config spi_cfg;
 	struct device *dio_dev[SX1276_MAX_DIO];
@@ -87,7 +94,19 @@ void SX1276SetBoardTcxo(u8_t state)
 
 void SX1276SetAntSw(u8_t opMode)
 {
-	/* TODO */
+#ifdef CONFIG_PA_RFO_PIN
+	switch (opMode) {
+	case RFLR_OPMODE_TRANSMITTER:
+		gpio_pin_set(dev_data.ant_sw, GPIO_ANT_SW_PIN, 1);
+		break;
+	case RFLR_OPMODE_RECEIVER:
+	case RFLR_OPMODE_RECEIVER_SINGLE:
+	case RFLR_OPMODE_CAD:
+	default:
+		gpio_pin_set(dev_data.ant_sw, GPIO_ANT_SW_PIN, 0);
+		break;
+	}
+#endif
 }
 
 void SX1276Reset(void)
@@ -499,6 +518,20 @@ static int sx1276_lora_init(struct device *dev)
 		       DT_INST_GPIO_LABEL(0, reset_gpios));
 		return -EIO;
 	}
+
+#ifdef CONFIG_PA_RFO_PIN
+	dev_data.ant_sw = device_get_binding(
+			DT_INST_0_SEMTECH_SX1276_ANT_SW_GPIOS_CONTROLLER);
+	if (!dev_data.ant_sw) {
+		LOG_ERR("Cannot get pointer to %s device",
+		       DT_INST_0_SEMTECH_SX1276_ANT_SW_GPIOS_CONTROLLER);
+		return -EIO;
+	}
+
+	gpio_pin_configure(dev_data.ant_sw, GPIO_ANT_SW_PIN,
+				 GPIO_OUTPUT_INACTIVE | GPIO_ANT_SW_FLAGS);
+#endif
+
 
 	/* Perform soft reset */
 	ret = gpio_pin_configure(dev_data.reset, GPIO_RESET_PIN,
