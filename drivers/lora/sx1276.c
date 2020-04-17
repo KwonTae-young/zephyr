@@ -69,6 +69,7 @@ struct sx1276_data {
 	u8_t rx_len;
 	s8_t snr;
 	s16_t rssi;
+	bool tx_done;
 } dev_data;
 
 bool SX1276CheckRfFrequency(uint32_t frequency)
@@ -371,6 +372,12 @@ void SX1276SetRfTxPower(int8_t power)
 
 static int sx1276_lora_send(struct device *dev, u8_t *data, u32_t data_len)
 {
+	if (dev_data.tx_done == false) {
+		return -EALREADY;
+	}
+
+	dev_data.tx_done = false;
+
 	Radio.SetMaxPayloadLength(MODEM_LORA, data_len);
 
 	Radio.Send(data, data_len);
@@ -380,6 +387,8 @@ static int sx1276_lora_send(struct device *dev, u8_t *data, u32_t data_len)
 
 static void sx1276_tx_done(void)
 {
+	dev_data.tx_done = true;
+
 	Radio.Sleep();
 }
 
@@ -399,6 +408,10 @@ static int sx1276_lora_recv(struct device *dev, u8_t *data, u8_t size,
 			    s32_t timeout, s16_t *rssi, s8_t *snr)
 {
 	int ret;
+
+	if (dev_data.tx_done == false) {
+		return -EALREADY;
+	}
 
 	Radio.SetMaxPayloadLength(MODEM_LORA, 255);
 	Radio.Rx(0);
@@ -557,6 +570,7 @@ static int sx1276_lora_init(struct device *dev)
 
 	dev_data.sx1276_event.TxDone = sx1276_tx_done;
 	dev_data.sx1276_event.RxDone = sx1276_rx_done;
+	dev_data.tx_done = true;
 	Radio.Init(&dev_data.sx1276_event);
 
 	LOG_INF("SX1276 Version:%02x found", regval);
