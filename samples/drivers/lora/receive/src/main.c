@@ -31,9 +31,9 @@ void main(void)
 		return;
 	}
 
-	config.frequency = 865100000;
+	config.frequency = 922300000;
 	config.bandwidth = BW_125_KHZ;
-	config.datarate = SF_10;
+	config.datarate = SF_12;
 	config.preamble_len = 8;
 	config.coding_rate = CR_4_5;
 	config.tx_power = 14;

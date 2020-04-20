@@ -30,12 +30,12 @@ void main(void)
 		return;
 	}
 
-	config.frequency = 865100000;
+	config.frequency = 922300000;
 	config.bandwidth = BW_125_KHZ;
-	config.datarate = SF_10;
+	config.datarate = SF_12;
 	config.preamble_len = 8;
 	config.coding_rate = CR_4_5;
-	config.tx_power = 4;
+	config.tx_power = 17;
 	config.tx = true;
 
 	ret = lora_config(lora_dev, &config);
@@ -54,6 +54,6 @@ void main(void)
 		LOG_INF("Data sent!");
 
 		/* Send data at 1s interval */
-		k_sleep(K_MSEC(1000));
+		k_sleep(K_MSEC(3000));
 	}
 }
