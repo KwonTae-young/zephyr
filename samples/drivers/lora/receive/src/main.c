@@ -50,11 +50,20 @@ void main(void)
 		len = lora_recv(lora_dev, data, MAX_DATA_LEN, K_FOREVER,
 				&rssi, &snr);
 		if (len < 0) {
+			switch (len) {
+			case -EALREADY:
+				LOG_ERR("TxDone event has not occurred yet.");
+				break;
+			case -EIO:
+				LOG_ERR("CRC Error!!");
+				break;
+			default:
+				break;
+			}
 			LOG_ERR("LoRa receive failed");
-			return;
+		} else {
+			LOG_INF("Received data: %s (RSSI:%ddBm, SNR:%ddBm)",
+				log_strdup(data), rssi, snr);
 		}
-
-		LOG_INF("Received data: %s (RSSI:%ddBm, SNR:%ddBm)",
-			log_strdup(data), rssi, snr);
 	}
 }
