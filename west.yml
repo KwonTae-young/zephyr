@@ -21,6 +21,8 @@ manifest:
   remotes:
     - name: upstream
       url-base: https://github.com/zephyrproject-rtos
+    - name: m2i
+      url-base: http://192.168.4.211/zephyr/module
 
   #
   # Please add items below based on alphabetical order
@@ -68,7 +70,8 @@ manifest:
       revision: fa481784b3c49780f18d50bafe00390ccb62b2ec
       path: modules/hal/st
     - name: hal_stm32
-      revision: ff9b7f295da7e8918fbe3e0119b5271cb9cb4a55
+      remote: m2i
+      revision: 20f4b2d0b61729c6f043139069e7602659b1a83b
       path: modules/hal/stm32
     - name: hal_ti
       revision: 811363a384cbd2d2b699cae7b8c4375de8218b65
