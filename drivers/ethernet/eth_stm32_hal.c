@@ -31,6 +31,17 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #error DTCM for DMA buffer is activated but zephyr,dtcm is not present in dts
 #endif
 
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+#define ETH_MULTICASTFRAMESFILTER_PERFECTHASHTABLE    ((uint32_t)0x00000404U)
+#define ETH_MULTICASTFRAMESFILTER_HASHTABLE           ((uint32_t)0x00000004U)
+#define ETH_MULTICASTFRAMESFILTER_PERFECT             ((uint32_t)0x00000000U)
+#define ETH_MULTICASTFRAMESFILTER_NONE                ((uint32_t)0x00000010U)
+#define ETH_RXBUFNB 4
+#define ETH_TXBUFNB 4
+#define PHY_BSR                         ((uint16_t)0x01U)
+#define PHY_LINKED_STATUS               ((uint16_t)0x0004U)
+#endif
+
 #if defined(CONFIG_ETH_STM32_HAL_USE_DTCM_FOR_DMA_BUFFER) && \
 	    DT_HAS_NODE(DT_CHOSEN(zephyr_dtcm))
 static ETH_DMADescTypeDef dma_rx_desc_tab[ETH_RXBUFNB] __dtcm_noinit_section;
@@ -71,6 +82,21 @@ static inline void disable_mcast_filter(ETH_HandleTypeDef *heth)
 {
 	__ASSERT_NO_MSG(heth != NULL);
 
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	ETH_MACFilterConfigTypeDef mac_filter_conf;
+	mac_filter_conf.PromiscuousMode = ENABLE;
+	mac_filter_conf.HashUnicast = DISABLE;
+	mac_filter_conf.HashMulticast = DISABLE;
+	mac_filter_conf.DestAddrInverseFiltering = DISABLE;
+	mac_filter_conf.PassAllMulticast = ENABLE;
+	mac_filter_conf.BroadcastFilter = ENABLE;
+	mac_filter_conf.ControlPacketsFilter = DISABLE;
+	mac_filter_conf.SrcAddrInverseFiltering = DISABLE;
+	mac_filter_conf.SrcAddrFiltering = DISABLE;
+	mac_filter_conf.HachOrPerfectFilter = DISABLE;
+	mac_filter_conf.ReceiveAllMode = ENABLE;
+	HAL_ETH_SetMACFilterConfig(heth, &mac_filter_conf);
+#else
 	u32_t tmp = heth->Instance->MACFFR;
 
 	/* disable multicast filtering */
@@ -89,6 +115,7 @@ static inline void disable_mcast_filter(ETH_HandleTypeDef *heth)
 	tmp = heth->Instance->MACFFR;
 	k_sleep(K_MSEC(1));
 	heth->Instance->MACFFR = tmp;
+#endif
 }
 
 static int eth_tx(struct device *dev, struct net_pkt *pkt)
@@ -99,6 +126,8 @@ static int eth_tx(struct device *dev, struct net_pkt *pkt)
 	int res;
 	u16_t total_len;
 	__IO ETH_DMADescTypeDef *dma_tx_desc;
+
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
 
 	__ASSERT_NO_MSG(pkt != NULL);
 	__ASSERT_NO_MSG(pkt->frags != NULL);
@@ -116,24 +145,45 @@ static int eth_tx(struct device *dev, struct net_pkt *pkt)
 		goto error;
 	}
 
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	dma_tx_desc = heth->Init.TxDesc;
+#else
 	dma_tx_desc = heth->TxDesc;
-	while ((dma_tx_desc->Status & ETH_DMATXDESC_OWN) != (u32_t)RESET) {
+#endif
+	while ((dma_tx_desc->DESC3 & ETH_DMATXNDESCRF_OWN) != (u32_t)RESET) {
 		k_yield();
 	}
-
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	dma_buffer = (u8_t *)(dma_tx_desc->DESC0);
+#else
 	dma_buffer = (u8_t *)(dma_tx_desc->Buffer1Addr);
+#endif
 
 	if (net_pkt_read(pkt, dma_buffer, total_len)) {
 		res = -EIO;
 		goto error;
 	}
 
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	ETH_TxPacketConfig txconfig;
+
+	memset(&txconfig, 0, sizeof(ETH_TxPacketConfig));
+	txconfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM |
+					ETH_TX_PACKETS_FEATURES_CRCPAD;
+	txconfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
+	txconfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
+	txconfig.Length = total_len;
+
+	if (HAL_ETH_Transmit(heth, &txconfig, 20) != HAL_OK) {
+#else
 	if (HAL_ETH_TransmitFrame(heth, total_len) != HAL_OK) {
+#endif
 		LOG_ERR("HAL_ETH_TransmitFrame failed");
 		res = -EIO;
 		goto error;
 	}
 
+#if !defined(CONFIG_SOC_SERIES_STM32H7X)
 	/* When Transmit Underflow flag is set, clear it and issue a
 	 * Transmit Poll Demand to resume transmission.
 	 */
@@ -145,6 +195,7 @@ static int eth_tx(struct device *dev, struct net_pkt *pkt)
 		res = -EIO;
 		goto error;
 	}
+#endif
 
 	res = 0;
 error:
@@ -182,6 +233,8 @@ static struct net_pkt *eth_rx(struct device *dev, u16_t *vlan_tag)
 	u8_t *dma_buffer;
 	int i;
 
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
+
 	__ASSERT_NO_MSG(dev != NULL);
 
 	dev_data = DEV_DATA(dev);
@@ -190,6 +243,20 @@ static struct net_pkt *eth_rx(struct device *dev, u16_t *vlan_tag)
 
 	heth = &dev_data->heth;
 
+
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	if (HAL_ETH_IsRxDataAvailable(heth) != true) {
+		/* no frame available */
+		return NULL;
+	}
+
+	ETH_BufferTypeDef rxbuff;
+	u32_t framelength;
+
+	HAL_ETH_GetRxDataBuffer(heth, &rxbuff);
+	HAL_ETH_GetRxDataLength(heth, &framelength);
+	total_len = framelength;
+#else
 	if (HAL_ETH_GetReceivedFrame_IT(heth) != HAL_OK) {
 		/* no frame available */
 		return NULL;
@@ -197,6 +264,7 @@ static struct net_pkt *eth_rx(struct device *dev, u16_t *vlan_tag)
 
 	total_len = heth->RxFrameInfos.length;
 	dma_buffer = (u8_t *)heth->RxFrameInfos.buffer;
+#endif
 
 	pkt = net_pkt_rx_alloc_with_buffer(get_iface(dev_data, *vlan_tag),
 					   total_len, AF_UNSPEC, 0, K_NO_WAIT);
@@ -213,6 +281,7 @@ static struct net_pkt *eth_rx(struct device *dev, u16_t *vlan_tag)
 	}
 
 release_desc:
+#if !defined(CONFIG_SOC_SERIES_STM32H7X)
 	/* Release descriptors to DMA */
 	/* Point to first descriptor */
 	dma_rx_desc = heth->RxFrameInfos.FSRxDesc;
@@ -235,6 +304,7 @@ release_desc:
 		/* Resume DMA reception */
 		heth->Instance->DMARPDR = 0;
 	}
+#endif
 
 #if defined(CONFIG_NET_VLAN)
 	struct net_eth_hdr *hdr = NET_ETH_HDR(pkt);
@@ -273,6 +343,8 @@ static void rx_thread(void *arg1, void *unused1, void *unused2)
 	int res;
 	u32_t status;
 
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
+
 	__ASSERT_NO_MSG(arg1 != NULL);
 	ARG_UNUSED(unused1);
 	ARG_UNUSED(unused2);
@@ -283,9 +355,16 @@ static void rx_thread(void *arg1, void *unused1, void *unused2)
 	__ASSERT_NO_MSG(dev_data != NULL);
 
 	while (1) {
+		LOG_DBG("ETH_DMACSR: 0x%x", dev_data->heth.Instance->DMACSR);
+		LOG_DBG("ETH_MTLQICSR: 0x%x", dev_data->heth.Instance->MTLQICSR);
+		LOG_DBG("ETH_MACPCSR: 0x%x", dev_data->heth.Instance->MACPCSR);
+		LOG_DBG("ETH_MACLCSR: 0x%x", dev_data->heth.Instance->MACLCSR);
+		LOG_DBG("");
+
 		res = k_sem_take(&dev_data->rx_int_sem,
 			K_MSEC(CONFIG_ETH_STM32_CARRIER_CHECK_RX_IDLE_TIMEOUT_MS));
 		if (res == 0) {
+			LOG_DBG("%s() %dLine", __func__, __LINE__);
 			/* semaphore taken, update link status and receive packets */
 			if (dev_data->link_up != true) {
 				dev_data->link_up = true;
@@ -304,10 +383,17 @@ static void rx_thread(void *arg1, void *unused1, void *unused2)
 			}
 		} else if (res == -EAGAIN) {
 			/* semaphore timeout period expired, check link status */
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+			if (HAL_ETH_ReadPHYRegister(&dev_data->heth,
+				CONFIG_ETH_STM32_HAL_PHY_ADDRESS, PHY_BSR,
+				(uint32_t *) &status) == HAL_OK) {
+#else
 			if (HAL_ETH_ReadPHYRegister(&dev_data->heth, PHY_BSR,
 				(uint32_t *) &status) == HAL_OK) {
+#endif
 				if ((status & PHY_LINKED_STATUS) == PHY_LINKED_STATUS) {
 					if (dev_data->link_up != true) {
+						LOG_DBG("Link UP!");
 						dev_data->link_up = true;
 						net_eth_carrier_on(
 							get_iface(dev_data,
@@ -315,6 +401,7 @@ static void rx_thread(void *arg1, void *unused1, void *unused2)
 					}
 				} else {
 					if (dev_data->link_up != false) {
+						LOG_DBG("Link DOWN!");
 						dev_data->link_up = false;
 						net_eth_carrier_off(
 							get_iface(dev_data,
@@ -331,6 +418,8 @@ static void eth_isr(void *arg)
 	struct device *dev;
 	struct eth_stm32_hal_dev_data *dev_data;
 	ETH_HandleTypeDef *heth;
+
+	LOG_ERR("%s() %dLine!!", __func__, __LINE__);
 
 	__ASSERT_NO_MSG(arg != NULL);
 
@@ -349,6 +438,8 @@ static void eth_isr(void *arg)
 
 void HAL_ETH_RxCpltCallback(ETH_HandleTypeDef *heth_handle)
 {
+	LOG_DBG("%s() %dLine!!", __func__, __LINE__);
+
 	__ASSERT_NO_MSG(heth_handle != NULL);
 
 	struct eth_stm32_hal_dev_data *dev_data =
@@ -400,8 +491,10 @@ static int eth_initialize(struct device *dev)
 		(clock_control_subsys_t *)&cfg->pclken_tx);
 	ret |= clock_control_on(dev_data->clock,
 		(clock_control_subsys_t *)&cfg->pclken_rx);
+#if !defined(CONFIG_SOC_SERIES_STM32H7X)
 	ret |= clock_control_on(dev_data->clock,
 		(clock_control_subsys_t *)&cfg->pclken_ptp);
+#endif
 
 	if (ret) {
 		LOG_ERR("Failed to enable ethernet clock");
@@ -422,7 +515,11 @@ static int eth_initialize(struct device *dev)
 #endif
 
 	heth->Init.MACAddr = dev_data->mac_addr;
-
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	heth->Init.TxDesc = dma_tx_desc_tab;
+	heth->Init.RxDesc = dma_rx_desc_tab;
+	heth->Init.RxBuffLen = ETH_RX_BUF_SIZE;
+#endif
 	hal_ret = HAL_ETH_Init(heth);
 	if (hal_ret == HAL_TIMEOUT) {
 		/* HAL Init time out. This could be linked to */
@@ -433,6 +530,8 @@ static int eth_initialize(struct device *dev)
 		LOG_ERR("HAL_ETH_Init failed: %d", hal_ret);
 		return -EINVAL;
 	}
+
+
 
 	dev_data->link_up = false;
 
@@ -447,12 +546,58 @@ static int eth_initialize(struct device *dev)
 			K_PRIO_COOP(CONFIG_ETH_STM32_HAL_RX_THREAD_PRIO),
 			0, K_NO_WAIT);
 
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	for (int idx = 0; idx < ETH_RXBUFNB; idx ++)	{
+		HAL_ETH_DescAssignMemory(heth, idx, dma_rx_buffer[idx], NULL);
+	}
+#else
 	HAL_ETH_DMATxDescListInit(heth, dma_tx_desc_tab,
 		&dma_tx_buffer[0][0], ETH_TXBUFNB);
 	HAL_ETH_DMARxDescListInit(heth, dma_rx_desc_tab,
 		&dma_rx_buffer[0][0], ETH_RXBUFNB);
+#endif
 
+	/*
+	 * LAN8742(PHY Chip) Register Read
+	 *
+	 * Basic Control Register: 0x3000
+	 * Basic Status Register: 0x7809
+	 * PHY Identifier 1 Register: 0x7
+	 * PHY Identifier 2 Register: 0xc131
+	 */
+	u32_t status;
+
+	HAL_ETH_ReadPHYRegister(&dev_data->heth,
+					CONFIG_ETH_STM32_HAL_PHY_ADDRESS,
+					0x00, (uint32_t *) &status);
+	LOG_DBG("Basic Control Register: 0x%x", status);
+
+	HAL_ETH_ReadPHYRegister(&dev_data->heth,
+					CONFIG_ETH_STM32_HAL_PHY_ADDRESS,
+					0x01, (uint32_t *) &status);
+	LOG_DBG("Basic Status Register: 0x%x", status);
+
+	HAL_ETH_ReadPHYRegister(&dev_data->heth,
+					CONFIG_ETH_STM32_HAL_PHY_ADDRESS,
+					0x02, (uint32_t *) &status);
+	LOG_DBG("PHY Identifier 1 Register: 0x%x", status);
+
+	HAL_ETH_ReadPHYRegister(&dev_data->heth,
+					CONFIG_ETH_STM32_HAL_PHY_ADDRESS,
+					0x03, (uint32_t *) &status);
+	LOG_DBG("PHY Identifier 2 Register: 0x%x", status);
+
+	ETH_MACConfigTypeDef mac_conf;
+	HAL_ETH_GetMACConfig(heth, &mac_conf);
+	mac_conf.DuplexMode = ETH_FULLDUPLEX_MODE;
+	mac_conf.Speed = ETH_SPEED_100M;
+	HAL_ETH_SetMACConfig(heth, &mac_conf);
+
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	HAL_ETH_Start_IT(heth);
+#else
 	HAL_ETH_Start(heth);
+#endif
 
 	disable_mcast_filter(heth);
 
@@ -465,6 +610,10 @@ static int eth_initialize(struct device *dev)
 		dev_data->mac_addr[2], dev_data->mac_addr[3],
 		dev_data->mac_addr[4], dev_data->mac_addr[5]);
 
+	LOG_DBG("ETH_DMACSR: 0x%x", heth->Instance->DMACSR);
+	LOG_DBG("ETH_MTLISR: 0x%x", heth->Instance->MTLISR);
+	LOG_DBG("ETH_MACISR: 0x%x", heth->Instance->MACISR);
+
 	return 0;
 }
 
@@ -472,6 +621,8 @@ static void eth_iface_init(struct net_if *iface)
 {
 	struct device *dev;
 	struct eth_stm32_hal_dev_data *dev_data;
+
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
 
 	__ASSERT_NO_MSG(iface != NULL);
 
@@ -501,6 +652,8 @@ static void eth_iface_init(struct net_if *iface)
 
 static enum ethernet_hw_caps eth_stm32_hal_get_capabilities(struct device *dev)
 {
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
+
 	ARG_UNUSED(dev);
 
 	return ETHERNET_LINK_10BASE_T | ETHERNET_LINK_100BASE_T
@@ -516,6 +669,8 @@ static int eth_stm32_hal_set_config(struct device *dev,
 {
 	struct eth_stm32_hal_dev_data *dev_data;
 	ETH_HandleTypeDef *heth;
+
+	LOG_DBG("%s() %dLine", __func__, __LINE__);
 
 	switch (type) {
 	case ETHERNET_CONFIG_TYPE_MAC_ADDRESS:
@@ -549,6 +704,8 @@ static struct device DEVICE_NAME_GET(eth0_stm32_hal);
 
 static void eth0_irq_config(void)
 {
+	LOG_DBG("%s() ETH_IRQn=%d", __func__, ETH_IRQn);
+
 	IRQ_CONNECT(ETH_IRQn, CONFIG_ETH_STM32_HAL_IRQ_PRI, eth_isr,
 		    DEVICE_GET(eth0_stm32_hal), 0);
 	irq_enable(ETH_IRQn);
@@ -556,6 +713,14 @@ static void eth0_irq_config(void)
 
 static const struct eth_stm32_hal_dev_cfg eth0_config = {
 	.config_func = eth0_irq_config,
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+	.pclken   =   { .bus = STM32_CLOCK_BUS_AHB1,
+			.enr = LL_AHB1_GRP1_PERIPH_ETH1MAC },
+	.pclken_tx =  { .bus = STM32_CLOCK_BUS_AHB1,
+			.enr = LL_AHB1_GRP1_PERIPH_ETH1TX },
+	.pclken_rx =  { .bus = STM32_CLOCK_BUS_AHB1,
+			.enr = LL_AHB1_GRP1_PERIPH_ETH1RX },
+#else
 	.pclken   =   { .bus = STM32_CLOCK_BUS_AHB1,
 			.enr = LL_AHB1_GRP1_PERIPH_ETHMAC },
 	.pclken_tx =  { .bus = STM32_CLOCK_BUS_AHB1,
@@ -564,12 +729,20 @@ static const struct eth_stm32_hal_dev_cfg eth0_config = {
 			.enr = LL_AHB1_GRP1_PERIPH_ETHMACRX },
 	.pclken_ptp = { .bus = STM32_CLOCK_BUS_AHB1,
 			.enr = LL_AHB1_GRP1_PERIPH_ETHMACPTP },
+#endif
 };
 
 static struct eth_stm32_hal_dev_data eth0_data = {
 	.heth = {
 		.Instance = ETH,
 		.Init = {
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+#if defined(CONFIG_ETH_STM32_HAL_MII)
+			.MediaInterface = HAL_ETH_MII_MODE,
+#else
+			.MediaInterface = HAL_ETH_RMII_MODE,
+#endif /* CONFIG_ETH_STM32_HAL_MII */
+#else
 			.AutoNegotiation = ETH_AUTONEGOTIATION_ENABLE,
 			.PhyAddress = CONFIG_ETH_STM32_HAL_PHY_ADDRESS,
 			.RxMode = ETH_RXINTERRUPT_MODE,
@@ -578,7 +751,8 @@ static struct eth_stm32_hal_dev_data eth0_data = {
 			.MediaInterface = ETH_MEDIA_INTERFACE_MII,
 #else
 			.MediaInterface = ETH_MEDIA_INTERFACE_RMII,
-#endif
+#endif /* CONFIG_ETH_STM32_HAL_MII */
+#endif /* CONFIG_SOC_SERIES_STM32H7X */
 		},
 	},
 	.mac_addr = {
